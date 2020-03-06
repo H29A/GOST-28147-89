@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
-#include <limits.h>
 
 #define BUFF_SIZE 8192
 #define DEFAULT_KEY_GENERATOR_ALFABET "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -21,6 +20,11 @@
 #define SUBSTITUTION_TABLE_CRYPTO_PRO_B "CP-B"
 #define SUBSTITUTION_TABLE_CRYPTO_PRO_C "CP-C"
 #define SUBSTITUTION_TABLE_CRYPTO_PRO_D "CP-D"
+#define ARG_VALUE_FROM_FILE "-f"
+
+#define STRSWITCH(STR)      uint8_t _x[16]; strcpy(_x, STR); if (false)
+#define STRCASE(STR)        } else if (strcmp(_x, STR)==0){
+#define STRDEFAULT          } else {
 
 // Implementation of cyclical left shift
 #define LSHIFT_nBIT(x, L, N) (((x << L) | (x >> (-L & (N - 1)))) & (((uint64_t)1 << N) - 1))
@@ -89,7 +93,8 @@ struct initial {
     uint8_t key256bit[32];
     uint8_t * keyGeneratorAlphabet;
     uint8_t substitutionTable[8][16];
-    uint8_t substitutionTableType[4];
+    uint8_t substitutionTableType[5];
+    uint8_t * filename;
 } initial = { 
     false, 
     false, 
@@ -99,10 +104,11 @@ struct initial {
     {0}, 
     DEFAULT_KEY_GENERATOR_ALFABET,
     {0},
-    SUBSTITUTION_TABLE_CRYPTO_PRO_A
+    SUBSTITUTION_TABLE_CRYPTO_PRO_A,
+    ""
 };
 
-static inline void showUsage(uint8_t * argv);
+static inline void showUsage();
 static void * rand_string(uint8_t * str, uint8_t * alphabet, size_t size);
 static inline void print_array(uint8_t * array, size_t length);
 static inline void print_bits(uint64_t x, register uint64_t Nbit);
@@ -127,85 +133,94 @@ size_t GOST_28147(uint8_t * to, uint8_t * mode, uint8_t * key256bit, uint8_t * f
 void encrypt(uint8_t * key);
 void decrypt(uint8_t * key);
 
-int main(int argc, char *argv[]) {
+void exit_failure() {
+    showUsage();
+    _Exit(EXIT_FAILURE);
+}
+
+void check_next_argv(uint8_t argc, uint8_t i) {
+    if (i + 1 >= argc) {
+        exit_failure();
+    }
+}
+
+int main(int32_t argc, uint8_t *argv[]) {
     srand(time(NULL));
 
     memcpy(initial.substitutionTable, substitutionTable.CryptoPro_A, sizeof(initial.substitutionTable));
     strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_A);
 
-    for (uint8_t i = 0; i < argc; ++i) {
-        if (strcmp(argv[i], ARG_VALUE_SET_KEY_GENERATOR_ALPHABET) == 0) {  
-            if (i + 1 >= argc) {
-                showUsage(argv[0]);
-                _Exit(EXIT_FAILURE);
-            }
-            initial.showKeyGeneratorAlphabet = true;
-            initial.keyGeneratorAlphabet = malloc(strlen(argv[i + 1]));
-            strcpy(initial.keyGeneratorAlphabet, argv[i + 1]);
-        }
-
-        if (strcmp(argv[i], ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET) == 0) {
-            initial.showKeyGeneratorAlphabet = true;
-        }
-
-        if (strcmp(argv[i], ARG_VALUE_SHOW_ASCII) == 0) {
-            initial.showASCII = true;
-        }
-
-        if (strcmp(argv[i], ARG_VALUE_KEY) == 0) {
-            if (i + 1 >= argc) {
-                showUsage(argv[0]);
-                _Exit(EXIT_FAILURE);
-            }
-            initial.needKeyGeneration = false;
-            strcpy(initial.key256bit, argv[i+1]);
-        }
-
-        if (strcmp(argv[i], ARG_VALUE_DECRYPT) == 0) {
-            initial.decrypt = true;
-        }
-        
-        if (strcmp(argv[i], ARG_VALUE_ENCRYPT) == 0) {
-            initial.encrypt = true;
-        }
-
-        if (strcmp(argv[i], ARG_VALUE_HELP) == 0 || argc <= 1) {
-            showUsage(argv[0]);
-        }
-
-        if (strcmp(argv[i], ARG_VALUE_SET_SUBSTITUTION_TABLE) == 0) {
-            if (i + 1 >= argc) {
-                showUsage(argv[0]);
-                _Exit(EXIT_FAILURE);
-            }
-
-            if (strcmp(argv[i + 1], SUBSTITUTION_TABLE_CRYPTO_PRO_A) == 0) {
-                continue;
-            } else if (strcmp(argv[i + 1], SUBSTITUTION_TABLE_CRYPTO_PRO_B) == 0) {
-                strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_B);
-                memcpy(initial.substitutionTable, substitutionTable.CryptoPro_B, sizeof(initial.substitutionTable));
-            } else if (strcmp(argv[i + 1], SUBSTITUTION_TABLE_CRYPTO_PRO_C) == 0) {
-                strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_C);
-                memcpy(initial.substitutionTable, substitutionTable.CryptoPro_C, sizeof(initial.substitutionTable));
-            } else if (strcmp(argv[i + 1], SUBSTITUTION_TABLE_CRYPTO_PRO_D) == 0) {
-                strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_D);
-                memcpy(initial.substitutionTable, substitutionTable.CryptoPro_D, sizeof(initial.substitutionTable));
-            } else {
-                showUsage(argv[0]);
-                _Exit(EXIT_FAILURE);
-            }
-        }
+    if (argc <= 1) {
+        exit_failure();
     }
 
-    if (initial.needKeyGeneration == true) {
+    for (uint8_t i = 0; i < argc; ++i) {
+        STRSWITCH(argv[i])
+        {
+            STRCASE (ARG_VALUE_ENCRYPT)    
+                initial.encrypt = true;    
+
+            STRCASE (ARG_VALUE_DECRYPT)    
+                initial.decrypt = true;
+
+            STRCASE (ARG_VALUE_SET_KEY_GENERATOR_ALPHABET)
+                check_next_argv(argc, i);
+                initial.showKeyGeneratorAlphabet = true;
+                initial.keyGeneratorAlphabet = malloc(strlen(argv[i + 1]));
+                strcpy(initial.keyGeneratorAlphabet, argv[i + 1]);
+
+            STRCASE (ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET)
+                initial.showKeyGeneratorAlphabet = true;
+
+            STRCASE (ARG_VALUE_SHOW_ASCII)
+                initial.showASCII = true;
+
+            STRCASE (ARG_VALUE_KEY)
+                check_next_argv(argc, i);
+                initial.needKeyGeneration = false;
+                strcpy(initial.key256bit, argv[i+1]);
+
+            STRCASE (ARG_VALUE_HELP)    
+                showUsage();
+
+            STRCASE (ARG_VALUE_SET_SUBSTITUTION_TABLE) 
+                check_next_argv(argc, i);   
+                STRSWITCH(argv[i + 1])
+                {
+                    STRCASE (SUBSTITUTION_TABLE_CRYPTO_PRO_A)
+                        continue;
+                    STRCASE (SUBSTITUTION_TABLE_CRYPTO_PRO_B)
+                        strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_B);
+                        memcpy(initial.substitutionTable, substitutionTable.CryptoPro_B, sizeof(initial.substitutionTable));
+                    
+                    STRCASE (SUBSTITUTION_TABLE_CRYPTO_PRO_C)
+                        strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_C);
+                        memcpy(initial.substitutionTable, substitutionTable.CryptoPro_C, sizeof(initial.substitutionTable));
+
+                    STRCASE (SUBSTITUTION_TABLE_CRYPTO_PRO_D)
+                        strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_D);
+                        memcpy(initial.substitutionTable, substitutionTable.CryptoPro_D, sizeof(initial.substitutionTable));
+
+                    STRDEFAULT
+                        exit_failure();                       
+                }   
+
+            STRCASE (ARG_VALUE_FROM_FILE)
+                check_next_argv(argc, i);
+                initial.filename = argv[i + 1];
+        }
+    }
+    
+    if (initial.needKeyGeneration) 
+    {
         strcpy(initial.key256bit, rand_string(initial.key256bit, initial.keyGeneratorAlphabet, sizeof(uint8_t) * 32));
     }
 
-    if (initial.encrypt == true) {
+    if (initial.encrypt) {
         encrypt(initial.key256bit);
     }
 
-    if (initial.decrypt == true) {
+    if (initial.decrypt) {
         decrypt(initial.key256bit);
     }
 
@@ -411,10 +426,10 @@ size_t GOST_28147(uint8_t * to, uint8_t * mode, uint8_t * key256bit, uint8_t * f
     return length;
 }
 
-static inline void showUsage(uint8_t * argv) {
-    printf("\nUsage: %s [%s <table_type>] [%s <string_key>] [%s <string_alphabet>] [%s] [%s] [%s] [%s] [%s]\n", argv,  ARG_VALUE_SET_SUBSTITUTION_TABLE, ARG_VALUE_KEY, ARG_VALUE_SET_KEY_GENERATOR_ALPHABET, ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET, ARG_VALUE_ENCRYPT, ARG_VALUE_DECRYPT, ARG_VALUE_SHOW_ASCII, ARG_VALUE_HELP);
+static inline void showUsage() {
+    printf("\nUsage: GOST_28147-89.exe [%s <table_type>] [%s <string_key>] [%s <string_alphabet>] [%s] [%s] [%s] [%s] [%s]\n",  ARG_VALUE_SET_SUBSTITUTION_TABLE, ARG_VALUE_KEY, ARG_VALUE_SET_KEY_GENERATOR_ALPHABET, ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET, ARG_VALUE_ENCRYPT, ARG_VALUE_DECRYPT, ARG_VALUE_SHOW_ASCII, ARG_VALUE_HELP);
     printf("Options: \n");
-    printf("  %-6s   <table_type>     \tSet type of substitution table.  (default: %s).\n", ARG_VALUE_SET_SUBSTITUTION_TABLE, SUBSTITUTION_TABLE_CRYPTO_PRO_A, SUBSTITUTION_TABLE_CRYPTO_PRO_B, SUBSTITUTION_TABLE_CRYPTO_PRO_C, SUBSTITUTION_TABLE_CRYPTO_PRO_D, SUBSTITUTION_TABLE_CRYPTO_PRO_A); 
+    printf("  %-6s   <table_type>     \tSet type of substitution table.  (default: %s).\n", ARG_VALUE_SET_SUBSTITUTION_TABLE, SUBSTITUTION_TABLE_CRYPTO_PRO_A); 
     printf("                          \tReplacement units are defined in RFC 4357 (https://tools.ietf.org/html/rfc4357).\n");
     printf("                          \tThere are four types available: [%s], [%s], [%s] and [%s].\n", SUBSTITUTION_TABLE_CRYPTO_PRO_A, SUBSTITUTION_TABLE_CRYPTO_PRO_B, SUBSTITUTION_TABLE_CRYPTO_PRO_C, SUBSTITUTION_TABLE_CRYPTO_PRO_D); 
     printf("                          \tWhere CP means CryptoPro, hyphen letter means table modification. \n");
