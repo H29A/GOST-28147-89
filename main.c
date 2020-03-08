@@ -4,9 +4,11 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
+#include <jansson.h>
 
 #define BUFF_SIZE 8192
 #define DEFAULT_KEY_GENERATOR_ALFABET "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+#define SUBSTITUTION_TABLES_FILE_NAME "tables.json"
 
 #define ARG_VALUE_KEY "-k"
 #define ARG_VALUE_SET_KEY_GENERATOR_ALPHABET "-kga"
@@ -16,10 +18,7 @@
 #define ARG_VALUE_HELP "-h"
 #define ARG_VALUE_SHOW_ASCII "-sa"
 #define ARG_VALUE_SET_SUBSTITUTION_TABLE "-t"
-#define SUBSTITUTION_TABLE_CRYPTO_PRO_A "CP-A"
-#define SUBSTITUTION_TABLE_CRYPTO_PRO_B "CP-B"
-#define SUBSTITUTION_TABLE_CRYPTO_PRO_C "CP-C"
-#define SUBSTITUTION_TABLE_CRYPTO_PRO_D "CP-D"
+#define SUBSTITUTION_TABLE_DEFAULT_NAME "id-Gost28147-89-CryptoPro-A-ParamSet"
 #define ARG_VALUE_FROM_FILE "-f"
 
 #define STRSWITCH(STR)      uint8_t _x[16]; strcpy(_x, STR); if (false)
@@ -29,14 +28,8 @@
 // Implementation of cyclical left shift
 #define LSHIFT_nBIT(x, L, N) (((x << L) | (x >> (-L & (N - 1)))) & (((uint64_t)1 << N) - 1))
 
-static const struct substitutionTable {
-    uint8_t CryptoPro_A[8][16];
-    uint8_t CryptoPro_B[8][16];
-    uint8_t CryptoPro_C[8][16];
-    uint8_t CryptoPro_D[8][16];
-} substitutionTable = {
-    // Substitution table (identifier: id-Gost28147-89-CryptoPro-A-ParamSet)
-    { 
+// Default Substitution table (identifier: id-Gost28147-89-CryptoPro-A-ParamSet)
+const uint8_t default_substitution_table[8][16] = { 
         {0x9, 0x6, 0x3, 0x2, 0x8, 0xB, 0x1, 0x7, 0xA, 0x4, 0xE, 0xF, 0xC, 0x0, 0xD, 0x5}, 
         {0x3, 0x7, 0xE, 0x9, 0x8, 0xA, 0xF, 0x0, 0x5, 0x2, 0x6, 0xC, 0xB, 0x4, 0xD, 0x1},
         {0xE, 0x4, 0x6, 0x2, 0xB, 0x3, 0xD, 0x8, 0xC, 0xF, 0x5, 0xA, 0x0, 0x7, 0x1, 0x9},
@@ -45,56 +38,19 @@ static const struct substitutionTable {
         {0x3, 0xA, 0xD, 0xC, 0x1, 0x2, 0x0, 0xB, 0x7, 0x5, 0x9, 0x4, 0x8, 0xF, 0xE, 0x6},
         {0x1, 0xD, 0x2, 0x9, 0x7, 0xA, 0x6, 0x0, 0x8, 0xC, 0x4, 0x5, 0xF, 0x3, 0xB, 0xE},
         {0xB, 0xA, 0xF, 0x5, 0x0, 0xC, 0xE, 0x8, 0x6, 0x2, 0x3, 0x9, 0x1, 0x7, 0xD, 0x4},
-    },
-
-    // Substitution table (identifier: id-Gost28147-89-CryptoPro-B-ParamSet)
-    { 
-        {0x8, 0x4, 0xB, 0x1, 0x3, 0x5, 0x0, 0x9, 0x2, 0xE, 0xA, 0xC, 0xD, 0x6, 0x7, 0xF}, 
-        {0x0, 0x1, 0x2, 0xA, 0x4, 0xD, 0x5, 0xC, 0x9, 0x7, 0x3, 0xF, 0xB, 0x8, 0x6, 0xE},
-        {0xE, 0xC, 0x0, 0xA, 0x9, 0x2, 0xD, 0xB, 0x7, 0x5, 0x8, 0xF, 0x3, 0x6, 0x1, 0x4},
-        {0x7, 0x5, 0x0, 0xD, 0xB, 0x6, 0x1, 0x2, 0x3, 0xA, 0xC, 0xF, 0x4, 0xE, 0x9, 0x8},
-        {0x2, 0x7, 0xC, 0xF, 0x9, 0x5, 0xA, 0xB, 0x1, 0x4, 0x0, 0xD, 0x6, 0x8, 0xE, 0x3},
-        {0x8, 0x3, 0x2, 0x6, 0x4, 0xD, 0x3, 0xB, 0xC, 0x1, 0x7, 0xF, 0xA, 0x0, 0x9, 0x5},
-        {0x5, 0x2, 0xA, 0xB, 0x9, 0x1, 0xC, 0x3, 0x7, 0x4, 0xD, 0x0, 0x6, 0xF, 0x8, 0xE},
-        {0x0, 0x4, 0xB, 0xE, 0x8, 0x3, 0x7, 0x1, 0xA, 0x2, 0x9, 0x6, 0xF, 0xD, 0x5, 0xC},
-    },
-
-    // Substitution table (identifier:id-Gost28147-89-CryptoPro-C-ParamSet)
-    { 
-        {0x1, 0xB, 0xC, 0x2, 0x9, 0xD, 0x0, 0xF, 0x4, 0x5, 0x8, 0xE, 0xA, 0x7, 0x6, 0x3}, 
-        {0x0, 0x1, 0x7, 0xD, 0xB, 0x4, 0x5, 0x2, 0x8, 0xE, 0xF, 0xC, 0x9, 0xA, 0x6, 0x3},
-        {0x8, 0x2, 0x5, 0x0, 0x4, 0x9, 0xF, 0xA, 0x3, 0x7, 0xC, 0xD, 0x6, 0xE, 0x1, 0xB},
-        {0x3, 0x6, 0x0, 0x1, 0x5, 0xD, 0xA, 0x8, 0xB, 0x2, 0x9, 0x7, 0xE, 0xF, 0xC, 0x4},
-        {0x8, 0xD, 0xB, 0x0, 0x4, 0x5, 0x1, 0x2, 0x9, 0x3, 0xC, 0xE, 0x6, 0xF, 0xA, 0x7},
-        {0xC, 0x9, 0xB, 0x1, 0x8, 0xE, 0x2, 0x4, 0x7, 0x3, 0x6, 0x5, 0xA, 0x0, 0xF, 0xD},
-        {0xA, 0x9, 0x6, 0x8, 0xD, 0xE, 0x2, 0x0, 0xF, 0x3, 0x5, 0xB, 0x4, 0x1, 0xC, 0x7},
-        {0x7, 0x4, 0x0, 0x5, 0xA, 0x2, 0xF, 0xE, 0xC, 0x6, 0x1, 0xB, 0xD, 0x9, 0x3, 0x8},
-    },
-
-    // Substitution table (identifier: id-Gost28147-89-CryptoPro-D-ParamSet)
-    { 
-        {0xF, 0xC, 0x2, 0xA, 0x6, 0x4, 0x5, 0x0, 0x7, 0x9, 0xE, 0xD, 0x1, 0xB, 0x8, 0x3}, 
-        {0xB, 0x6, 0x3, 0x4, 0xC, 0xF, 0xE, 0x2, 0x7, 0xD, 0x8, 0x0, 0x5, 0xA, 0x9, 0x1},
-        {0x1, 0xC, 0xB, 0x0, 0xF, 0xE, 0x6, 0x5, 0xA, 0xD, 0x4, 0x8, 0x9, 0x3, 0x7, 0x2},
-        {0x1, 0x5, 0xE, 0xC, 0xA, 0x7, 0x0, 0xD, 0x6, 0x2, 0xB, 0x4, 0x9, 0x3, 0xF, 0x8},
-        {0x0, 0xC, 0x8, 0x9, 0xD, 0x2, 0xA, 0xB, 0x7, 0x3, 0x6, 0x5, 0x4, 0xE, 0xF, 0x1},
-        {0x8, 0x0, 0xF, 0x3, 0x2, 0x5, 0xE, 0xB, 0x1, 0xA, 0x4, 0x7, 0xC, 0x9, 0xD, 0x6},
-        {0x3, 0x0, 0x6, 0xF, 0x1, 0xE, 0x9, 0x2, 0xD, 0x8, 0xC, 0x4, 0xB, 0xA, 0x5, 0x7},
-        {0x1, 0xA, 0x6, 0x8, 0xF, 0xB, 0x0, 0x4, 0xC, 0x3, 0x5, 0x9, 0x7, 0xD, 0x2, 0xE},
-    }
 };
 
 struct initial {
     bool encrypt;
     bool decrypt;
-    bool showASCII;
-    bool showKeyGeneratorAlphabet;
-    bool needKeyGeneration;
-    uint8_t key256bit[32];
-    uint8_t * keyGeneratorAlphabet;
-    uint8_t substitutionTable[8][16];
-    uint8_t substitutionTableType[5];
-    uint8_t * filename;
+    bool show_ASCII;
+    bool show_key_generator_alphabet;
+    bool need_key_generation;
+    uint8_t key_256_bit[32];
+    uint8_t * key_generator_alphabet;
+    uint8_t substitution_table[8][16];
+    uint8_t * substitution_table_name;
+    uint8_t * file_name;
 } initial = { 
     false, 
     false, 
@@ -104,7 +60,7 @@ struct initial {
     {0}, 
     DEFAULT_KEY_GENERATOR_ALFABET,
     {0},
-    SUBSTITUTION_TABLE_CRYPTO_PRO_A,
+    "",
     ""
 };
 
@@ -113,7 +69,7 @@ static void * rand_string(uint8_t * str, uint8_t * alphabet, size_t size);
 static inline void print_array(uint8_t * array, size_t length);
 static inline void print_bits(uint64_t x, register uint64_t Nbit);
 
-void split_256_bit_key_into_32_bit_parts(uint8_t * key256bit, uint32_t * keys32bit);
+void split_256_bit_key_into_32_bit_parts(uint8_t * key_256_bit, uint32_t * keys32bit);
 void split_64bits_to_32bits(uint64_t block64bit, uint32_t * block32bit_1, uint32_t * block32bit_2);
 void split_64bits_to_8bits(uint64_t block64bit, uint8_t * blocks8bit);
 void split_32bits_to_8bits(uint32_t block32bit, uint8_t * blocks8bit);
@@ -128,7 +84,7 @@ uint32_t substitution_table(uint32_t block32bit, uint8_t sbox_row);
 void round_of_feistel_cipher(uint32_t * block32bit_1, uint32_t * block32bit_2, uint32_t * keys32bit, uint8_t round);
 void feistel_cipher(uint8_t * mode, uint32_t * block32bit_1, uint32_t * block32bit_2, uint32_t * keys32bit);
 
-size_t GOST_28147(uint8_t * to, uint8_t * mode, uint8_t * key256bit, uint8_t * from, size_t length);
+size_t GOST_28147(uint8_t * to, uint8_t * mode, uint8_t * key_256_bit, uint8_t * from, size_t length);
 
 void encrypt(uint8_t * key);
 void decrypt(uint8_t * key);
@@ -138,17 +94,48 @@ void exit_failure() {
     _Exit(EXIT_FAILURE);
 }
 
-void check_next_argv(uint8_t argc, uint8_t i) {
+void check_next_argv(uint8_t argc, uint8_t * argv, uint8_t i) {
     if (i + 1 >= argc) {
+        printf("Failed then read argument [%s], please check halp info\n", argv);
         exit_failure();
+    }
+}
+
+void load_replacement_table(uint8_t * tables_file, uint8_t * table_name) {
+    json_error_t error;
+    json_t * tables = json_load_file(tables_file, 0, &error);
+
+    if (!tables) {
+        printf("Failed while opening %s\n", tables_file);
+        printf("json error: %s:%d:%d: %s\n", error.source, error.line, error.column, error.text);
+        exit_failure();
+    }
+
+    json_t * loaded_table = json_object_get(tables, table_name);
+
+    if (!loaded_table) {
+        printf("Failed when trying get %s in %s file\n", table_name, tables_file);
+        exit_failure();
+    } else if (!json_is_array(loaded_table)) {
+        printf("%s in %s is not an array\n", table_name, tables_file);
+        exit_failure();
+    }
+
+    printf("Table \"%s\" loaded successfully\n", table_name);
+
+    size_t first_dimension_index;
+    json_t * first_dimension_array_value;
+    json_array_foreach(loaded_table, first_dimension_index, first_dimension_array_value) {
+        size_t second_dimension_index;
+        uint8_t * second_dimension_array_value;
+        json_array_foreach(first_dimension_array_value, second_dimension_index, second_dimension_array_value) {
+            initial.substitution_table[first_dimension_index][second_dimension_index] = strtol(json_string_value(second_dimension_array_value), NULL, 0x10);
+        }
     }
 }
 
 int main(int32_t argc, uint8_t *argv[]) {
     srand(time(NULL));
-
-    memcpy(initial.substitutionTable, substitutionTable.CryptoPro_A, sizeof(initial.substitutionTable));
-    strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_A);
 
     if (argc <= 1) {
         exit_failure();
@@ -164,64 +151,50 @@ int main(int32_t argc, uint8_t *argv[]) {
                 initial.decrypt = true;
 
             STRCASE (ARG_VALUE_SET_KEY_GENERATOR_ALPHABET)
-                check_next_argv(argc, i);
-                initial.showKeyGeneratorAlphabet = true;
-                initial.keyGeneratorAlphabet = malloc(strlen(argv[i + 1]));
-                strcpy(initial.keyGeneratorAlphabet, argv[i + 1]);
+                check_next_argv(argc, argv[i], i);
+                initial.show_key_generator_alphabet = true;
+                initial.key_generator_alphabet = malloc(strlen(argv[i + 1]));
+                strcpy(initial.key_generator_alphabet, argv[i + 1]);
 
             STRCASE (ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET)
-                initial.showKeyGeneratorAlphabet = true;
+                initial.show_key_generator_alphabet = true;
 
             STRCASE (ARG_VALUE_SHOW_ASCII)
-                initial.showASCII = true;
+                initial.show_ASCII = true;
 
             STRCASE (ARG_VALUE_KEY)
-                check_next_argv(argc, i);
-                initial.needKeyGeneration = false;
-                strcpy(initial.key256bit, argv[i+1]);
+                check_next_argv(argc, argv[i], i);
+                initial.need_key_generation = false;
+                strcpy(initial.key_256_bit, argv[i+1]);
 
             STRCASE (ARG_VALUE_HELP)    
                 showUsage();
 
             STRCASE (ARG_VALUE_SET_SUBSTITUTION_TABLE) 
-                check_next_argv(argc, i);   
-                STRSWITCH(argv[i + 1])
-                {
-                    STRCASE (SUBSTITUTION_TABLE_CRYPTO_PRO_A)
-                        continue;
-                    STRCASE (SUBSTITUTION_TABLE_CRYPTO_PRO_B)
-                        strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_B);
-                        memcpy(initial.substitutionTable, substitutionTable.CryptoPro_B, sizeof(initial.substitutionTable));
-                    
-                    STRCASE (SUBSTITUTION_TABLE_CRYPTO_PRO_C)
-                        strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_C);
-                        memcpy(initial.substitutionTable, substitutionTable.CryptoPro_C, sizeof(initial.substitutionTable));
-
-                    STRCASE (SUBSTITUTION_TABLE_CRYPTO_PRO_D)
-                        strcpy(initial.substitutionTableType, SUBSTITUTION_TABLE_CRYPTO_PRO_D);
-                        memcpy(initial.substitutionTable, substitutionTable.CryptoPro_D, sizeof(initial.substitutionTable));
-
-                    STRDEFAULT
-                        exit_failure();                       
-                }   
+                check_next_argv(argc, argv[i], i);   
+                load_replacement_table(SUBSTITUTION_TABLES_FILE_NAME, argv[i + 1]);
+                initial.substitution_table_name = argv[i + 1];
 
             STRCASE (ARG_VALUE_FROM_FILE)
-                check_next_argv(argc, i);
-                initial.filename = argv[i + 1];
+                check_next_argv(argc, argv[i], i);
+                initial.file_name = argv[i + 1];
         }
     }
+
+    if (initial.substitution_table_name == "") {
+        memcpy(initial.substitution_table, default_substitution_table, sizeof(initial.substitution_table));
+        strcpy(initial.substitution_table_name, SUBSTITUTION_TABLE_DEFAULT_NAME);
+    }
     
-    if (initial.needKeyGeneration) 
+    if (initial.need_key_generation) 
     {
-        strcpy(initial.key256bit, rand_string(initial.key256bit, initial.keyGeneratorAlphabet, sizeof(uint8_t) * 32));
+        strcpy(initial.key_256_bit, rand_string(initial.key_256_bit, initial.key_generator_alphabet, sizeof(uint8_t) * 32));
     }
 
     if (initial.encrypt) {
-        encrypt(initial.key256bit);
-    }
-
-    if (initial.decrypt) {
-        decrypt(initial.key256bit);
+        encrypt(initial.key_256_bit);
+    } else if (initial.decrypt) {
+        decrypt(initial.key_256_bit);
     }
 
     return EXIT_SUCCESS;
@@ -242,16 +215,16 @@ void encrypt(uint8_t * key) {
 
     position = GOST_28147(data, ARG_VALUE_ENCRYPT, key, buffer, position);
 
-    printf("Substitution table type: %s\n", initial.substitutionTableType);
+    printf("Substitution table type: %s\n", initial.substitution_table_name);
     printf("Key: [%s]\n", key);
 
-    if (initial.showKeyGeneratorAlphabet == true) {
-        printf("Key generator alphabet: [%s]\n", initial.keyGeneratorAlphabet);
+    if (initial.show_key_generator_alphabet == true) {
+        printf("Key generator alphabet: [%s]\n", initial.key_generator_alphabet);
     }
 
     printf("Encrypted message: [%s]\n", data);
 
-    if (initial.showASCII == true) {
+    if (initial.show_ASCII == true) {
         printf("ASCII encrypted message: ");
         print_array(data, position);
     }
@@ -272,29 +245,29 @@ void decrypt(uint8_t * key) {
 
     position = GOST_28147(data, ARG_VALUE_DECRYPT, key, buffer, position);
 
-    printf("Substitution table type: %s\n", initial.substitutionTableType);
+    printf("Substitution table type: %s\n", initial.substitution_table_name);
     printf("Key: [%s]\n", key);
 
-    if (initial.showKeyGeneratorAlphabet == true) {
-        printf("Key generator alphabet: [%s]\n", initial.keyGeneratorAlphabet);
+    if (initial.show_key_generator_alphabet == true) {
+        printf("Key generator alphabet: [%s]\n", initial.key_generator_alphabet);
     }
 
     printf("Decrypted message: [%s]\n", data);
 
-    if (initial.showASCII == true) {
+    if (initial.show_ASCII == true) {
         printf("ASCII decrypted message: ");
         print_array(data, position);
     }
 }
 
 // Generation of subkeys from the main 256-bit key by splitting into eight 32-bit keys (K0...K7)
-void split_256_bit_key_into_32_bit_parts(uint8_t * key256bit, uint32_t * keys32bit) {
-    int8_t * pKey256bit = key256bit;
+void split_256_bit_key_into_32_bit_parts(uint8_t * key_256_bit, uint32_t * keys32bit) {
+    int8_t * pkey_256_bit = key_256_bit;
     for (uint32_t *pKeys32bit = keys32bit; pKeys32bit < keys32bit + 8; ++pKeys32bit) {
         for (uint8_t i = 0; i < 4; ++i) {
-            *pKeys32bit = (*pKeys32bit << 8) | *(pKey256bit + i);
+            *pKeys32bit = (*pKeys32bit << 8) | *(pkey_256_bit + i);
         }
-        pKey256bit += 4;
+        pkey_256_bit += 4;
     }
 }
 
@@ -331,10 +304,10 @@ void substitution_table_by_4bits(uint8_t * blocks4bit, uint8_t sbox_row) {
     uint8_t block4bit_1, block4bit_2;
     for (uint8_t i = 0; i < 4; ++i) {
         // Get right half of 8-bit block and do replacement
-        block4bit_1 = initial.substitutionTable[sbox_row][blocks4bit[i] & 0x0F]; 
+        block4bit_1 = initial.substitution_table[sbox_row][blocks4bit[i] & 0x0F]; 
 
         // Get left half of 8-bit block and do replacement
-        block4bit_2 = initial.substitutionTable[sbox_row][blocks4bit[i] >> 4];
+        block4bit_2 = initial.substitution_table[sbox_row][blocks4bit[i] >> 4];
 
         // Concat in 8-bit
         blocks4bit[i] = (block4bit_2 << 4) | block4bit_1; 
@@ -406,10 +379,10 @@ uint64_t join_32bits_to_64bits(uint32_t block32bit_1, uint32_t block32bit_2) {
     return block64b;
 }
 
-size_t GOST_28147(uint8_t * to, uint8_t * mode, uint8_t * key256bit, uint8_t * from, size_t length) {
+size_t GOST_28147(uint8_t * to, uint8_t * mode, uint8_t * key_256_bit, uint8_t * from, size_t length) {
     length = length % 8 == 0 ? length : length + (8 - (length % 8));
     uint32_t N1, N2, keys32bit[8];
-    split_256_bit_key_into_32_bit_parts(key256bit, keys32bit);
+    split_256_bit_key_into_32_bit_parts(key_256_bit, keys32bit);
 
     for (size_t i = 0; i < length; i += 8) {
         split_64bits_to_32bits(
@@ -427,12 +400,9 @@ size_t GOST_28147(uint8_t * to, uint8_t * mode, uint8_t * key256bit, uint8_t * f
 }
 
 static inline void showUsage() {
-    printf("\nUsage: GOST_28147-89.exe [%s <table_type>] [%s <string_key>] [%s <string_alphabet>] [%s] [%s] [%s] [%s] [%s]\n",  ARG_VALUE_SET_SUBSTITUTION_TABLE, ARG_VALUE_KEY, ARG_VALUE_SET_KEY_GENERATOR_ALPHABET, ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET, ARG_VALUE_ENCRYPT, ARG_VALUE_DECRYPT, ARG_VALUE_SHOW_ASCII, ARG_VALUE_HELP);
+    printf("\nUsage: GOST_28147-89.exe [%s <table_name>] [%s <string_key>] [%s <string_alphabet>] [%s] [%s] [%s] [%s] [%s]\n",  ARG_VALUE_SET_SUBSTITUTION_TABLE, ARG_VALUE_KEY, ARG_VALUE_SET_KEY_GENERATOR_ALPHABET, ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET, ARG_VALUE_ENCRYPT, ARG_VALUE_DECRYPT, ARG_VALUE_SHOW_ASCII, ARG_VALUE_HELP);
     printf("Options: \n");
-    printf("  %-6s   <table_type>     \tSet type of substitution table.  (default: %s).\n", ARG_VALUE_SET_SUBSTITUTION_TABLE, SUBSTITUTION_TABLE_CRYPTO_PRO_A); 
-    printf("                          \tReplacement units are defined in RFC 4357 (https://tools.ietf.org/html/rfc4357).\n");
-    printf("                          \tThere are four types available: [%s], [%s], [%s] and [%s].\n", SUBSTITUTION_TABLE_CRYPTO_PRO_A, SUBSTITUTION_TABLE_CRYPTO_PRO_B, SUBSTITUTION_TABLE_CRYPTO_PRO_C, SUBSTITUTION_TABLE_CRYPTO_PRO_D); 
-    printf("                          \tWhere CP means CryptoPro, hyphen letter means table modification. \n");
+    printf("  %-6s   <table_name>     \tSet substitution table from %s file.  (default: %s).\n", ARG_VALUE_SET_SUBSTITUTION_TABLE, SUBSTITUTION_TABLES_FILE_NAME, SUBSTITUTION_TABLE_DEFAULT_NAME);                     
     printf("  %-6s   <string_key>     \tSet 256-bit key for encrypting/decrypting (default: randomly generated).\n", ARG_VALUE_KEY);
     printf("  %-6s   <string_alphabet>\tSet the key generation alphabet (default: 0-9a-zA-Z).\n", ARG_VALUE_SET_KEY_GENERATOR_ALPHABET);
     printf("  %-6s                   \tDisplay the key generation alphabet (default: off).\n", ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET);
