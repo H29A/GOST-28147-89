@@ -5,21 +5,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <jansson.h>
+#include "conf.h"
 
 #define BUFF_SIZE 8192
-#define DEFAULT_KEY_GENERATOR_ALFABET "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-#define SUBSTITUTION_TABLES_FILE_NAME "tables.json"
-
-#define ARG_VALUE_KEY "-k"
-#define ARG_VALUE_SET_KEY_GENERATOR_ALPHABET "-kga"
-#define ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET "-skga"
-#define ARG_VALUE_ENCRYPT "-e"
-#define ARG_VALUE_DECRYPT "-d"
-#define ARG_VALUE_HELP "-h"
-#define ARG_VALUE_SHOW_ASCII "-sa"
-#define ARG_VALUE_SET_SUBSTITUTION_TABLE "-t"
-#define SUBSTITUTION_TABLE_DEFAULT_NAME "id-Gost28147-89-CryptoPro-A-ParamSet"
-#define ARG_VALUE_FROM_FILE "-f"
 
 #define STRSWITCH(STR)      uint8_t _x[16]; strcpy(_x, STR); if (false)
 #define STRCASE(STR)        } else if (strcmp(_x, STR)==0){
@@ -28,18 +16,6 @@
 // Implementation of cyclical left shift
 #define LSHIFT_nBIT(x, L, N) (((x << L) | (x >> (-L & (N - 1)))) & (((uint64_t)1 << N) - 1))
 
-// Default Substitution table (identifier: id-Gost28147-89-CryptoPro-A-ParamSet)
-const uint8_t default_substitution_table[8][16] = { 
-        {0x9, 0x6, 0x3, 0x2, 0x8, 0xB, 0x1, 0x7, 0xA, 0x4, 0xE, 0xF, 0xC, 0x0, 0xD, 0x5}, 
-        {0x3, 0x7, 0xE, 0x9, 0x8, 0xA, 0xF, 0x0, 0x5, 0x2, 0x6, 0xC, 0xB, 0x4, 0xD, 0x1},
-        {0xE, 0x4, 0x6, 0x2, 0xB, 0x3, 0xD, 0x8, 0xC, 0xF, 0x5, 0xA, 0x0, 0x7, 0x1, 0x9},
-        {0xE, 0x7, 0xA, 0xC, 0xD, 0x1, 0x3, 0x9, 0x0, 0x2, 0xB, 0x4, 0xF, 0x8, 0x5, 0x6},
-        {0xB, 0x5, 0x1, 0x9, 0x8, 0xD, 0xF, 0x0, 0xE, 0x4, 0x2, 0x3, 0xC, 0x7, 0xA, 0x6},
-        {0x3, 0xA, 0xD, 0xC, 0x1, 0x2, 0x0, 0xB, 0x7, 0x5, 0x9, 0x4, 0x8, 0xF, 0xE, 0x6},
-        {0x1, 0xD, 0x2, 0x9, 0x7, 0xA, 0x6, 0x0, 0x8, 0xC, 0x4, 0x5, 0xF, 0x3, 0xB, 0xE},
-        {0xB, 0xA, 0xF, 0x5, 0x0, 0xC, 0xE, 0x8, 0x6, 0x2, 0x3, 0x9, 0x1, 0x7, 0xD, 0x4},
-};
-
 struct initial {
     bool encrypt;
     bool decrypt;
@@ -47,21 +23,16 @@ struct initial {
     bool show_key_generator_alphabet;
     bool need_key_generation;
     uint8_t key_256_bit[32];
-    uint8_t * key_generator_alphabet;
     uint8_t substitution_table[8][16];
-    uint8_t * substitution_table_name;
-    uint8_t * file_name;
+    const uint8_t * substitution_table_name;
 } initial = { 
     false, 
     false, 
     false, 
     false,
     true,
-    {0}, 
-    DEFAULT_KEY_GENERATOR_ALFABET,
     {0},
-    "",
-    ""
+    {0}
 };
 
 static inline void showUsage();
@@ -96,7 +67,7 @@ void exit_failure() {
 
 void check_next_argv(uint8_t argc, uint8_t * argv, uint8_t i) {
     if (i + 1 >= argc) {
-        printf("Failed then read argument [%s], please check halp info\n", argv);
+        printf("Failed then read flag [%s], please check halp info\n", argv);
         exit_failure();
     }
 }
@@ -106,7 +77,7 @@ void load_replacement_table(uint8_t * tables_file, uint8_t * table_name) {
     json_t * tables = json_load_file(tables_file, 0, &error);
 
     if (!tables) {
-        printf("Failed while opening %s\n", tables_file);
+        printf("Failed while loading %s\n", tables_file);
         printf("json error: %s:%d:%d: %s\n", error.source, error.line, error.column, error.text);
         exit_failure();
     }
@@ -127,8 +98,8 @@ void load_replacement_table(uint8_t * tables_file, uint8_t * table_name) {
     json_t * first_dimension_array_value;
     json_array_foreach(loaded_table, first_dimension_index, first_dimension_array_value) {
         size_t second_dimension_index;
-        uint8_t * second_dimension_array_value;
-        json_array_foreach(first_dimension_array_value, second_dimension_index, second_dimension_array_value) {
+        json_t * second_dimension_array_value;
+        json_array_foreach(json_array_get(loaded_table, first_dimension_index), second_dimension_index, second_dimension_array_value) {
             initial.substitution_table[first_dimension_index][second_dimension_index] = strtol(json_string_value(second_dimension_array_value), NULL, 0x10);
         }
     }
@@ -137,6 +108,10 @@ void load_replacement_table(uint8_t * tables_file, uint8_t * table_name) {
 int main(int32_t argc, uint8_t *argv[]) {
     srand(time(NULL));
 
+    if(!load_config_file(CONFIGURATION_FILE_NAME)) {
+        return EXIT_FAILURE;
+    }
+
     if (argc <= 1) {
         exit_failure();
     }
@@ -144,51 +119,48 @@ int main(int32_t argc, uint8_t *argv[]) {
     for (uint8_t i = 0; i < argc; ++i) {
         STRSWITCH(argv[i])
         {
-            STRCASE (ARG_VALUE_ENCRYPT)    
+            STRCASE (config.flag_value_encrypt)    
                 initial.encrypt = true;    
 
-            STRCASE (ARG_VALUE_DECRYPT)    
+            STRCASE (config.flag_value_decrypt)    
                 initial.decrypt = true;
 
-            STRCASE (ARG_VALUE_SET_KEY_GENERATOR_ALPHABET)
+            STRCASE (config.flag_value_set_key_generator_alphabet)
                 check_next_argv(argc, argv[i], i);
                 initial.show_key_generator_alphabet = true;
-                initial.key_generator_alphabet = malloc(strlen(argv[i + 1]));
-                strcpy(initial.key_generator_alphabet, argv[i + 1]);
+                config.key_generator_alphabet = malloc(strlen(argv[i + 1]));
+                strcpy(config.key_generator_alphabet, argv[i + 1]);
 
-            STRCASE (ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET)
+            STRCASE (config.flag_value_show_key_generator_alphabet)
                 initial.show_key_generator_alphabet = true;
 
-            STRCASE (ARG_VALUE_SHOW_ASCII)
+            STRCASE (config.flag_value_show_ASCII_codes)
                 initial.show_ASCII = true;
 
-            STRCASE (ARG_VALUE_KEY)
+            STRCASE (config.flag_value_key)
                 check_next_argv(argc, argv[i], i);
                 initial.need_key_generation = false;
                 strcpy(initial.key_256_bit, argv[i+1]);
 
-            STRCASE (ARG_VALUE_HELP)    
+            STRCASE (config.flag_value_show_help)    
                 showUsage();
 
-            STRCASE (ARG_VALUE_SET_SUBSTITUTION_TABLE) 
+            STRCASE (config.flag_value_set_substitution_table) 
                 check_next_argv(argc, argv[i], i);   
-                load_replacement_table(SUBSTITUTION_TABLES_FILE_NAME, argv[i + 1]);
+                load_replacement_table(config.substitution_table_file_name, argv[i + 1]);
                 initial.substitution_table_name = argv[i + 1];
-
-            STRCASE (ARG_VALUE_FROM_FILE)
-                check_next_argv(argc, argv[i], i);
-                initial.file_name = argv[i + 1];
         }
     }
 
-    if (initial.substitution_table_name == "") {
-        memcpy(initial.substitution_table, default_substitution_table, sizeof(initial.substitution_table));
-        strcpy(initial.substitution_table_name, SUBSTITUTION_TABLE_DEFAULT_NAME);
+
+    if (!initial.substitution_table_name) {
+        printf("You must select a replacement table\n");
+        exit_failure();
     }
     
     if (initial.need_key_generation) 
     {
-        strcpy(initial.key_256_bit, rand_string(initial.key_256_bit, initial.key_generator_alphabet, sizeof(uint8_t) * 32));
+        strcpy(initial.key_256_bit, rand_string(initial.key_256_bit, config.key_generator_alphabet, sizeof(uint8_t) * 32));
     }
 
     if (initial.encrypt) {
@@ -213,13 +185,13 @@ void encrypt(uint8_t * key) {
     }
     buffer[position] = '\0';
 
-    position = GOST_28147(data, ARG_VALUE_ENCRYPT, key, buffer, position);
+    position = GOST_28147(data, config.flag_value_encrypt, key, buffer, position);
 
     printf("Substitution table type: %s\n", initial.substitution_table_name);
     printf("Key: [%s]\n", key);
 
     if (initial.show_key_generator_alphabet == true) {
-        printf("Key generator alphabet: [%s]\n", initial.key_generator_alphabet);
+        printf("Key generator alphabet: [%s]\n", config.key_generator_alphabet);
     }
 
     printf("Encrypted message: [%s]\n", data);
@@ -243,13 +215,13 @@ void decrypt(uint8_t * key) {
     }
     buffer[position] = '\0';
 
-    position = GOST_28147(data, ARG_VALUE_DECRYPT, key, buffer, position);
+    position = GOST_28147(data, config.flag_value_decrypt, key, buffer, position);
 
     printf("Substitution table type: %s\n", initial.substitution_table_name);
     printf("Key: [%s]\n", key);
 
     if (initial.show_key_generator_alphabet == true) {
-        printf("Key generator alphabet: [%s]\n", initial.key_generator_alphabet);
+        printf("Key generator alphabet: [%s]\n", config.key_generator_alphabet);
     }
 
     printf("Decrypted message: [%s]\n", data);
@@ -351,7 +323,7 @@ void round_of_feistel_cipher(uint32_t * block32bit_1, uint32_t * block32bit_2, u
 
 void feistel_cipher(uint8_t * mode, uint32_t * block32bit_1, uint32_t * block32bit_2, uint32_t * keys32bit) {
 
-    if (strcmp(mode, ARG_VALUE_DECRYPT) == 0) {
+    if (strcmp(mode, config.flag_value_decrypt) == 0) {
         // K0, K1, K2, K3, K4, K5, K6, K7
             for (uint8_t round = 0; round < 8; ++round)
                 round_of_feistel_cipher(block32bit_1, block32bit_2, keys32bit, round);
@@ -361,7 +333,7 @@ void feistel_cipher(uint8_t * mode, uint32_t * block32bit_1, uint32_t * block32b
                 round_of_feistel_cipher(block32bit_1, block32bit_2, keys32bit, round);
     }
 
-    if (strcmp(mode, ARG_VALUE_ENCRYPT) == 0) {
+    if (strcmp(mode, config.flag_value_encrypt) == 0) {
         // K0, K1, K2, K3, K4, K5, K6, K7, K0, K1, K2, K3, K4, K5, K6, K7, K0, K1, K2, K3, K4, K5, K6, K7
             for (uint8_t round = 0; round < 24; ++round)
                 round_of_feistel_cipher(block32bit_1, block32bit_2, keys32bit, round);
@@ -400,16 +372,16 @@ size_t GOST_28147(uint8_t * to, uint8_t * mode, uint8_t * key_256_bit, uint8_t *
 }
 
 static inline void showUsage() {
-    printf("\nUsage: GOST_28147-89.exe [%s <table_name>] [%s <string_key>] [%s <string_alphabet>] [%s] [%s] [%s] [%s] [%s]\n",  ARG_VALUE_SET_SUBSTITUTION_TABLE, ARG_VALUE_KEY, ARG_VALUE_SET_KEY_GENERATOR_ALPHABET, ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET, ARG_VALUE_ENCRYPT, ARG_VALUE_DECRYPT, ARG_VALUE_SHOW_ASCII, ARG_VALUE_HELP);
+    printf("\nUsage: GOST_28147-89.exe [%s <table_name>] [%s <string_key>] [%s <string_alphabet>] [%s] [%s] [%s] [%s] [%s]\n\n",  config.flag_value_set_substitution_table, config.flag_value_key, config.flag_value_set_key_generator_alphabet, config.flag_value_show_key_generator_alphabet, config.flag_value_encrypt, config.flag_value_decrypt, config.flag_value_show_ASCII_codes, config.flag_value_show_help);
     printf("Options: \n");
-    printf("  %-6s   <table_name>     \tSet substitution table from %s file.  (default: %s).\n", ARG_VALUE_SET_SUBSTITUTION_TABLE, SUBSTITUTION_TABLES_FILE_NAME, SUBSTITUTION_TABLE_DEFAULT_NAME);                     
-    printf("  %-6s   <string_key>     \tSet 256-bit key for encrypting/decrypting (default: randomly generated).\n", ARG_VALUE_KEY);
-    printf("  %-6s   <string_alphabet>\tSet the key generation alphabet (default: 0-9a-zA-Z).\n", ARG_VALUE_SET_KEY_GENERATOR_ALPHABET);
-    printf("  %-6s                   \tDisplay the key generation alphabet (default: off).\n", ARG_VALUE_SHOW_KEY_GENERATOR_ALPHABET);
-    printf("  %-6s                   \tEncrypting operation.\n", ARG_VALUE_ENCRYPT);
-    printf("  %-6s                   \tDecrypting operation.\n", ARG_VALUE_DECRYPT);
-    printf("  %-6s                   \tDisplay the result also through ASCII table codes (default: off).\n", ARG_VALUE_SHOW_ASCII);
-    printf("  %-6s                   \tShow tooltips.\n", ARG_VALUE_HELP);
+    printf("  %-12s   <table_name>     \tSet substitution table from %s file.\n", config.flag_value_set_substitution_table, config.substitution_table_file_name);                     
+    printf("  %-12s   <string_key>     \tSet 256-bit key for encrypting/decrypting (default: randomly generated).\n", config.flag_value_key);
+    printf("  %-12s   <string_alphabet>\tSet the key generation alphabet (default: 0-9a-zA-Z).\n", config.flag_value_set_key_generator_alphabet);
+    printf("  %-12s                   \tDisplay the key generation alphabet (default: off).\n", config.flag_value_show_key_generator_alphabet);
+    printf("  %-12s                   \tEncrypting operation.\n", config.flag_value_encrypt);
+    printf("  %-12s                   \tDecrypting operation.\n", config.flag_value_decrypt);
+    printf("  %-12s                   \tDisplay the result also through ASCII table codes (default: off).\n", config.flag_value_show_ASCII_codes);
+    printf("  %-12s                   \tShow tooltips.\n", config.flag_value_show_help);
 }
 
 static void * rand_string(uint8_t * str, uint8_t * alphabet, size_t size)
